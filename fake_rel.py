@@ -1,7 +1,9 @@
+import os
 import random
 
 import cv2
 import numpy as np
+from PIL import Image, ImageFont, ImageDraw, ImageColor
 
 
 def show_img(img):
@@ -59,37 +61,21 @@ class Cell(object):
 
 
 class Table(object):
-    def __init__(self, widths: list = [0.6, 0.2, 0.2], table_widths=1000, table_height=500,
-                 n_cols=3, n_rows=4,
+    def __init__(self, widths: list = [0.6, 0.2, 0.2], table_widths=1500, table_height=500,
                  margin_left=10, margin_right=10, margin_top=5, margin_bottom=1):
-        self.width_each_cell = [table_widths // n_cols] * n_cols
-        self.heigh_each_cell = [table_height // n_rows] * n_rows
-        self.n_rows = n_rows
-        self.n_cols = n_cols
+
+        self.n_rows = table_height // Row(height=int(41 * table_widths / 1500), margin_top=margin_top,
+                                          margin_bottom=margin_bottom,
+                                          index=-1, line_top=Line(2, 1), line_bottom=Line(6, 2)).get_height()
+        self.n_cols = len(widths)
+        self.heigh_each_cell = [50] * self.n_rows
+        self.width_each_cell = list(map(lambda x: int(table_widths * x), widths))
+
         self.cols = []
         self.rows = []
         self.cells = [[] for _ in range(self.n_rows)]
 
-        # <------------------ gererate text in table --------------------->
-        # dong` dau tien
-        text = [[''] * self.n_cols for _ in range(self.n_rows)]
-        for i in range(1, self.n_cols):
-            text[0][i] = generate_date_data()
-        # dong 2 -> n-1
-        for i in range(1, self.n_rows - 1):
-            if random.random() < 0.2:
-                continue
-            text[i][0] = generate_string(random.randint(3, 10))
-            for j in range(1, self.n_cols):
-                if random.random() < 0.2:
-                    continue
-                text[i][j] = generate_tien(random.randint(7, 12))
-        # dong n
-        text[self.n_rows - 1][0] = "Cộng"
-        for j in range(1, self.n_cols):
-            text[self.n_rows - 1][j] = generate_tien(random.randint(7, 12))
-        # <------------------ \gererate text in table --------------------->
-
+        #
         for i, w in enumerate(self.width_each_cell[:-1]):
             self.cols.append(Col(width=w, margin_left=margin_left, margin_right=margin_right,
                                  index=i, line_left=Line(2, 1), line_right=Line(0, 0)))
@@ -105,47 +91,24 @@ class Table(object):
         self.table_height = sum([r.get_height() for r in self.rows])
         self.table_width = sum([c.get_width() for c in self.cols])
 
-        for i, r in enumerate(self.rows):
-            for j, c in enumerate(self.cols):
-                if i == 0 or i == self.n_rows - 1:
-                    self.cells[i].append(
-                        Cell(col=c, row=r, text=text[i][j], cell_id=j, font=self.fonts[1], align='left',
-                             size=self.size))
-                else:
-                    self.cells[i].append(
-                        Cell(col=c, row=r, text=text[i][j], cell_id=j, font=self.fonts[0], align='left',
-                             size=self.size))
-
-        for i in range(self.n_rows):
-            for j in range(self.n_cols):
-                if j != 0:
-                    self.cells[i][j].align = 'right'
-
     def get_col_start(self, index):
         return sum([c.get_width() for c in self.cols[:index]])
 
     def get_row_start(self, index):
         return sum([r.get_height() for r in self.rows[:index]])
 
+    def get_table_bounding_box(self):
+        return (self.table_height, self.table_width)
+
     def draw(self, background_color=255):
         img = np.zeros((self.table_height, self.table_width, 3), dtype=np.uint8)
         img[:, :] = background_color
         for i in range(self.n_rows):
-            if i != 1 and i != self.n_rows - 1:
-                continue
             for j in range(self.n_cols):
-                if i == self.n_rows - 1 and j != 0:
-                    img = self.show_cell_by_xy(img, i, j, left=False, right=False, top=True, bottom=True,
-                                               margin_left=True, margin_right=True)
-                elif i == self.n_rows - 1 and j == 0:
-                    continue
-                else:
-                    img = self.show_cell_by_xy(img, i, j, left=False, right=False, top=True, bottom=True)
-
-        for i_r, row in enumerate(self.rows):
-            for i_c, col in enumerate(self.cols):
-                img = self.draw_text_cell_by_xy(img, i_r, i_c)
+                img = self.show_cell_by_xy(img, i, j, left=True, right=True, top=True, bottom=True,
+                                           margin_left=False, margin_right=False)
         return img
+
 
     def draw_line(self, line: Line, img, xmin, xmax, ymin, ymax, orient='vertical'):
         assert orient in ['vertical', 'horizontal']
@@ -197,15 +160,6 @@ class Table(object):
                                  ymax=ymax)
         return img
 
-    def draw_text_cell_by_xy(self, img, x: int, y: int):
-        xmin, ymin, xmax, ymax = self.get_bounding_box_by_xy(x, y)
-        img = draw_text(text=self.cells[x][y].text, font=self.cells[x][y].font, align=self.cells[x][y].align,
-                        size=self.cells[x][y].size,
-                        xmin=ymin,
-                        ymin=xmin,
-                        xmax=ymax, ymax=xmax, img=img, text_color='#000000,#282828')
-        return img
-
     def get_bounding_box_by_xy(self, x, y):
         # row
         xmin = self.get_row_start(x) + self.rows[x].line_top.line_thichness + self.rows[x].margin_top
@@ -218,88 +172,8 @@ class Table(object):
         return xmin, ymin, xmax, ymax
 
 
-def draw_text(text, font, align, size, xmin, ymin, xmax, ymax, img, text_color='#000000,#282828'):
-    assert align in ['left', 'right', 'center', 'justify']
-    if type(img) == np.ndarray:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(img)  # BGR
-
-    image_font = ImageFont.truetype(font=font, size=size)
-    words = text.split(" ")
-    space_width = image_font.getsize(" ")[0] * 1
-    space_height = image_font.getsize(" ")[1] * 1
-    words_width = [image_font.getsize(w)[0] for w in words]
-    text_width = sum(words_width) + int(space_width) * (len(words) - 1)
-    text_height = max([image_font.getsize(w)[1] for w in words])
-
-    txt_draw = ImageDraw.Draw(img)
-    colors = [ImageColor.getrgb(c) for c in text_color.split(",")]
-    c1, c2 = colors[0], colors[-1]
-
-    fill = (
-        random.randint(min(c1[0], c2[0]), max(c1[0], c2[0])),
-        random.randint(min(c1[1], c2[1]), max(c1[1], c2[1])),
-        random.randint(min(c1[2], c2[2]), max(c1[2], c2[2])),
-    )
-    if align == 'right':
-        xmin = xmax - text_width
-    for i, w in enumerate(words):
-        start_x = sum(words_width[0:i]) + i * int(space_width) + xmin
-        start_y = 0 + ymin
-        if start_x + words_width[i] > xmax:
-            break
-        txt_draw.text(
-            (start_x, start_y),
-            w,
-            fill=fill,
-            font=image_font,
-        )
-
-    img = np.array(img)
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    return img
-
-
-def generate_date_data():
-    ngay = random.randint(1, 31)
-    thang = random.randint(1, 12)
-    nam = random.randint(2000, 2050)
-    return f"{ngay}/{thang}/{nam}"
-
-
-def generate_tien(n):
-    m = [str(random.randint(0, 9)) for _ in range(n)]
-    m_ = [''.join(m[i:i + 3]) for i in range(0, n, 3)]
-    s = '.'.join(m_)[::-1]
-    return s
-
-
-with open("/home/andn/PycharmProjects/TextRecognitionDataGenerator/texts/VNESEcorpus_5.txt") as f:
-    lines = f.readlines()
-
-
-def generate_string(n):
-    line = random.choice(lines)
-    words = line.split()
-    if len(words) < n:
-        return line
-    start = random.randint(0, len(words) - n)
-    return ' '.join(words[start:start + n])
-
-
-def map_pixel_to_size(pixel):
-    a = {11: 10, 12: 11, 14: 12, 15: 13, 16: 14, 17: 15, 18: 16, 20: 17, 21: 18, 21: 19, 22: 20, 23: 21, 25: 22,
-         26: 23, 27: 24, 28: 25, 30: 26, 31: 27, 31: 28, 32: 29, 34: 30, 35: 31, 36: 32, 37: 33, 38: 34, 40: 35, 41: 36,
-         41: 37, 42: 38, 43: 39}
-
-    while pixel not in a:
-        pixel += 1
-
-    return a[pixel]
-
-
 if __name__ == '__main__':
-    show_img(Table().draw(200))
+    show_img(Table().draw(255))
 # img = np.zeros((500, 500, 3), dtype=np.uint8) + 255
 # fonts = ['font/times.ttf', 'font/timesbd.ttf', 'font/timesi.ttf', 'font/timesbi.ttf']
 # draw_text(text="Đào Ngọc An", font=fonts[0], align='center', size=48, xmin=200, ymin=200, xmax=500, ymax=500, img=img,
